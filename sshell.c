@@ -7,19 +7,51 @@
 #define CMDLINE_MAX 512
 #define MAX_ARGS 16
 
-/*temporary need to fix
-made this because he recommends making a data structure / struct to hold all the data needed from command line so it does
-not need to be parsed again "The result of parsing the command line should be the instance of a data structure which contains 
-all the information necessary to launch the specified command (so that the original command line does not have to be parsed again)."
-Thought process was that worst case there will be 3 pipes given (because that is the max) and each command has 16 args
-so while parsing if a pipe is encountered store the first command in cmd1 and then keep parsing to store next one. There probably is a better way 
-to implemnent so it isnt so wastefull but not sure yet. */
 struct cmdLineData{
-    char *cmd1[MAX_ARGS+1];
-    char *cmd2[MAX_ARGS+1];
-    char *cmd3[MAX_ARGS+1];
-    char *cmd4[MAX_ARGS+1];
+    char *cmdData[MAX_ARGS+1];
+    char symbolAfterCmd;
+    struct cmdLineData *next;
 };
+
+struct cmdLineData *head = NULL;
+struct cmdLineData *tail = NULL;
+
+void listAppend(){
+	struct cmdLineData* newNode = malloc(sizeof(struct cmdLineData));
+	newNode->next = NULL;
+	if (head == NULL){
+		head = newNode;
+		tail = newNode;
+	}
+	else{
+		tail->next = newNode;
+		tail = newNode;
+	}
+}
+
+void print_list() {
+    struct cmdLineData* current = head;
+    while (current != NULL) {
+        for (int i = 0; i < MAX_ARGS; i++) {
+            if (current->cmdData[i] != NULL) {
+                printf("%s -> ", current->cmdData[i]);
+            }
+        }
+        printf("\n %c\n", current->symbolAfterCmd);
+        current = current->next;
+    }
+}
+
+void deallocate(struct cmdLineData* head){
+	struct cmdLineData* currentNode;
+	while (head != NULL){
+		currentNode = head;
+		head = head->next;
+		free(currentNode);
+		printf("deallocated\n");
+	}
+}
+
 
 /*Function: getCommandArgs
 returns an int of the amount of arguements given on command line
@@ -29,32 +61,50 @@ line string from fgets in main which we use to get tokens
 
 char **args is a pointer to the arglist pointer in main, 
 we use it to storethe args in an array of string used by execvp*/
-int getCommandArgs(char *stringToTok, struct cmdLineData *currentCommand){
+int getCommandArgs(char *stringToTok){
         int argc = 0;
-        char *token = strtok(stringToTok, " "); // tokenize string from space delimiter 
+        const char* delimiter = " "; 
+        char buffer[32];
+        char *token = strtok(stringToTok, delimiter); // tokenize string from space delimiter 
         //loop while there are still valid tokens and are in bounds of MAX_ARGS
         while (token != NULL && argc < MAX_ARGS){ 
-                //increment argc while also setting args to the token      
-                currentCommand->cmd1[argc++] = token;   //may need to change to: args[argc++] = strdup(token); 
-                token = strtok(NULL, " ");   //get next token  
+                char *delim_pos = strchr(token, '|');
+                if (!delim_pos) delim_pos = strchr(token, '>');
+
+                if (delim_pos) {
+                        // if so, copy the part of the token before the delimiter
+                        strncpy(buffer, token, delim_pos - token);
+                        buffer[delim_pos - token] = '\0';
+                        if (buffer[0] != '\0'){
+                                tail->cmdData[argc++] = buffer;   
+                        }
+                        tail->symbolAfterCmd = token[delim_pos - token];
+                        listAppend();
+                        argc = 0;
+                } else {
+                        // otherwise, treat the token as a regular token
+                        tail->cmdData[argc++] = token;   //may need to change to: args[argc++] = strdup(token); 
+                        tail->symbolAfterCmd = '\0';
+
+                }
+                //increment argc while also setting args to the token    
+                
+                token = strtok(NULL, delimiter);   //get next token  
         }
-        currentCommand->cmd1[argc] = NULL;      //set final string in array to null
+        tail->cmdData[argc] = NULL;      //set final string in array to null
+        print_list();
         return argc;
 
 }
 
-int main(void)
-{
+int main(void){
         /*command line will only ever have 512 chars so create array to hold the whole thing*/  
         char cmd[CMDLINE_MAX];  
         
         int argc;
-
-
         while (1) {
                 char *nl;
                 int retval;
-                 
 
                 /* Print prompt */
                 printf("sshell@ucd$ ");
@@ -80,28 +130,27 @@ int main(void)
                         break;
                 }
 
-                struct cmdLineData object1;
 
-                argc = getCommandArgs(cmd, &object1);    // call func to tokenize command line
+                listAppend();
+                
+                argc = getCommandArgs(cmd);    // call func to tokenize command line
 
                 if (argc < 0){  //if command line is empty
                         continue;       //go to next shell command
                 }
 
                 if (!fork()) { /* Fork off child process */
-                        execvp(object1.cmd1[0], object1.cmd1); /* Execute command */
+                        execvp(head->cmdData[0], head->cmdData); /* Execute command */
                         perror("execv"); /* Coming back here is an error */
                         exit(1);
                 } else {
                 /* Parent */
                 waitpid(-1, &retval, 0); /* Wait for child to exit */
-
-                // /* Regular command */
-                // retval = system(cmd);
-                // fprintf(stderr, "Return status value for '%s': %d\n",
-                //         cmd, retval);
+                deallocate(head);
+                head = NULL;
+                tail = NULL;
                 }
         }
-
+        
         return EXIT_SUCCESS;
 }
